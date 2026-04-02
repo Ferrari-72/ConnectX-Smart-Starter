@@ -1,16 +1,83 @@
 # ConnectX Smart Starter
 
-A beginner-friendly ConnectX bot with smart tactical play and efficient hybrid search. Easy to try, fast to run, and stronger than a typical starter submission.
+A beginner-friendly ConnectX bot with smart tactical play and efficient hybrid search.
 
-This repository is a small learning-first ConnectX project that grows in stages:
+![Tests](https://img.shields.io/badge/tests-38%20passed-brightgreen)
+![Python](https://img.shields.io/badge/python-3.x-blue)
+![Project](https://img.shields.io/badge/focus-ConnectX%20hybrid%20agent-orange)
 
-1. `Minimax` baseline with a hand-written heuristic.
-2. `DQN` baseline that learns Q-values from self-play against a simple opponent.
-3. `Minimax-DQN` hybrid that uses the learned network to score search leaves.
+Build, train, evaluate, and export a practical ConnectX starter bot from one compact codebase.
 
-The code is intentionally compact so you can read the full pipeline and map each file back to the RL concepts.
+This project turns a compact ConnectX reinforcement learning sandbox into a clean, approachable starter repository: readable code, exportable submissions, and a practical hybrid agent that combines tactical checks with search-guided play.
 
-## Current Structure
+## Highlights
+
+- Hybrid `Minimax-DQN` agent with tactical pre-checks for immediate wins and blocks
+- Single-file submission exports ready for Kaggle-style ConnectX environments
+- Compact codebase designed for learning, iteration, and experimentation
+- Automated test coverage with `38` passing tests in the current public release
+
+## Recommended Submission
+
+If you want the best public-facing submission candidate from this repository, start with:
+
+- `submissions/midpack_best_tactical_submission.py`
+
+Conservative fallback:
+
+- `submissions/midpack_best_submission.py`
+
+## Why This Repo
+
+`ConnectX Smart Starter` is built for people who want more than a toy baseline, but do not want a giant, hard-to-follow training stack.
+
+You can use it to:
+
+- study how a ConnectX board, search agent, replay buffer, and DQN trainer fit together
+- run small or medium training presets locally
+- evaluate saved checkpoints against common opponents
+- export a standalone submission bot without dragging the full project into production
+
+## Quick Start
+
+Run the pure minimax baseline:
+
+```bash
+python -m scripts.play_demo
+```
+
+Train a quick pipeline check:
+
+```bash
+python -m scripts.train_dqn --preset quick
+```
+
+Recommended first serious run on an RTX 4060 with the existing `pt` environment:
+
+```powershell
+& "E:\Users\ASUS\miniconda3\envs\pt\python.exe" -m scripts.train_dqn --preset midpack --device auto
+```
+
+Evaluate a saved hybrid checkpoint:
+
+```bash
+python -m scripts.evaluate_agents --agent hybrid --checkpoint checkpoints/midpack_best.pt --games 10
+```
+
+Run the full test suite:
+
+```bash
+python -m pytest
+```
+
+## Current Results
+
+- The repository contains both `DQN` and `Minimax-DQN` hybrid agents.
+- Historical experiments showed the hybrid pipeline can produce strong intermediate checkpoints against built-in minimax opponents.
+- The best public recommendation today is still the older proven `midpack_best` tactical submission lineage.
+- Reaching stable strength against deeper minimax opponents remains future work rather than a solved result.
+
+## Project Structure
 
 ```text
 connectx_rl/
@@ -23,92 +90,61 @@ connectx_rl/
   dqn_trainer.py        # Minimal DQN training loop with checkpoint support
   minimax_dqn_agent.py  # Hybrid search that uses DQN at leaf nodes
   evaluation.py         # Shared evaluation helper
+  kaggle_export.py      # Standalone submission export
 
 scripts/
   play_demo.py          # Pure minimax vs random
-  train_dqn.py          # Train DQN and optionally save/load checkpoints
+  train_dqn.py          # Train DQN and save/load checkpoints
   play_hybrid_demo.py   # Small hybrid smoke test
   evaluate_agents.py    # Compare agent families against common opponents
+
+submissions/
+  midpack_best_submission.py
+  midpack_best_tactical_submission.py
+  midpack_latest_submission.py
+  midpack_latest_tactical_submission.py
 
 tests/
   test_minimax_baseline.py
   test_dqn_baseline.py
   test_minimax_dqn.py
-  test_project_upgrade.py
+  test_kaggle_export.py
 ```
 
-## Quick Start
+## Learning Path
 
-Run the pure minimax baseline:
+If you are reading the code from scratch, this order works well:
 
-```bash
-python -m scripts.play_demo
-```
+1. `connectx_rl/board_utils.py`
+2. `connectx_rl/minimax_agent.py`
+3. `connectx_rl/dqn_agent.py`
+4. `connectx_rl/dqn_trainer.py`
+5. `connectx_rl/minimax_dqn_agent.py`
+6. `connectx_rl/kaggle_export.py`
 
-Train a small DQN model with periodic DQN and hybrid evaluation:
+## Training Presets
 
-```bash
-python -m scripts.train_dqn --preset quick
-```
+- `quick`: fast smoke run with periodic evaluation and `latest`/`best` checkpoints
+- `midpack`: balanced first serious run with stronger opponents and hybrid evaluation
+- `overnight`: longer ladder run for comparing checkpoints over a longer window
 
-Recommended first serious run on your `RTX 4060` using the existing `pt` environment:
+## Current Limitations
 
-```powershell
-& "E:\Users\ASUS\miniconda3\envs\pt\python.exe" -m scripts.train_dqn --preset midpack --device auto
-```
+- CUDA is only used if your PyTorch install supports it; otherwise training falls back to `cpu`
+- The DQN trainer is intentionally small and not yet tuned for top-tier Kaggle strength
+- Hybrid strength can vary across checkpoints, so checkpoint selection still matters a lot
+- The current public repo excludes large checkpoint artifacts on purpose
 
-Overnight run:
+## Tests
 
-```bash
-python -m scripts.train_dqn --preset overnight --device auto
-```
-
-Evaluate a saved hybrid agent:
-
-```bash
-python -m scripts.evaluate_agents --agent hybrid --checkpoint checkpoints/midpack_best.pt --games 10
-```
-
-Run the full test suite:
+The current public release was verified with:
 
 ```bash
 python -m pytest
 ```
 
-## Learning Path
+Result:
 
-If you are studying the project from scratch, follow this order:
-
-1. Read `board_utils.py` to understand how ConnectX states are represented.
-2. Read `heuristics.py` and `minimax_agent.py` to see classical search.
-3. Read `dqn_agent.py`, `q_network.py`, and `replay_buffer.py` to understand the DQN building blocks.
-4. Read `dqn_trainer.py` to see how transitions are generated and optimized.
-5. Read `minimax_dqn_agent.py` to see how search and learned value estimates are combined.
-
-## Current Limitations
-
-- If PyTorch is installed with CUDA support, training will auto-select `cuda`. Otherwise it falls back to `cpu`.
-- The DQN trainer is intentionally minimal and not yet tuned for strong Kaggle performance.
-- The hybrid agent uses `max Q` as a leaf score, which is a good teaching step but not the final form of a strong search evaluator.
-
-## Training Presets
-
-- `quick`: fast pipeline check with periodic evaluation and `latest`/`best` checkpoints.
-- `midpack`: the best first balanced run on a 4060, using stronger opponents and hybrid evaluation.
-- `overnight`: a longer run with the strongest built-in opponent ladder for comparing checkpoints the next day.
-
-## Training Governance
-
-- Training now runs in chunks and evaluates both `DQN` and `Minimax-DQN` after each interval.
-- Every evaluation saves a `latest` checkpoint and may replace a `best` checkpoint if the hybrid-first weighted score improves.
-- Opponent pools:
-  - `random`: random-only smoke training
-  - `mixed`: `random`, `minimax(depth=1)`, `minimax(depth=2)`
-  - `ladder`: `random`, `minimax(depth=1)`, `minimax(depth=2)`, `minimax(depth=3)`
-
-## Good Next Steps
-
-- Install CUDA-enabled PyTorch so training can use the GPU.
-- Add stronger opponents and periodic checkpoint evaluation.
-- Replace the leaf `max Q` estimate with a more stable value-style target.
-- Export a single-file Kaggle submission agent when you are ready to submit.
+```text
+38 passed
+```
