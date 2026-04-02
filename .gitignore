@@ -1,0 +1,10 @@
+checkpoints/
+.pytest_cache/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pt
+*.log
+*.err
+*.docx
