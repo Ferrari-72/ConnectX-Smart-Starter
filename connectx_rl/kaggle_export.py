@@ -24,15 +24,22 @@ def _render_model_constants(checkpoint: dict) -> tuple[list, list]:
     return weights, biases
 
 
-def build_hybrid_submission_source(checkpoint_path: str | Path, depth: int = 2) -> str:
+def build_hybrid_submission_source(
+    checkpoint_path: str | Path,
+    depth: int = 2,
+    time_limit_s: float | None = None,
+) -> str:
     checkpoint = load_checkpoint(checkpoint_path, map_location="cpu")
     weights, biases = _render_model_constants(checkpoint)
 
     return f'''from __future__ import annotations
 
+import time
+
 MODEL_WEIGHTS = {weights!r}
 MODEL_BIASES = {biases!r}
 SEARCH_DEPTH = {depth}
+TIME_LIMIT_SECONDS = {time_limit_s!r}
 WIN_SCORE = 1_000_000.0
 
 
@@ -94,6 +101,46 @@ def _has_connect_n(board, mark, n=4):
 
 def _is_full(board):
     return not _valid_moves(board)
+
+
+def _evaluate_window(window, my_mark, opp_mark):
+    score = 0.0
+    my_count = window.count(my_mark)
+    opp_count = window.count(opp_mark)
+    empty_count = window.count(0)
+
+    if my_count == 4:
+        score += 10_000.0
+    elif my_count == 3 and empty_count == 1:
+        score += 100.0
+    elif my_count == 2 and empty_count == 2:
+        score += 10.0
+
+    if opp_count == 3 and empty_count == 1:
+        score -= 120.0
+    elif opp_count == 2 and empty_count == 2:
+        score -= 12.0
+
+    return score
+
+
+def _evaluate_board(board, my_mark):
+    opp_mark = _opponent_mark(my_mark)
+    if _has_connect_n(board, my_mark):
+        return WIN_SCORE
+    if _has_connect_n(board, opp_mark):
+        return -WIN_SCORE
+
+    rows = len(board)
+    columns = len(board[0])
+    center_column = columns // 2
+    center_count = sum(1 for row in range(rows) if board[row][center_column] == my_mark)
+    score = center_count * 6.0
+
+    for window in _iter_windows(board, window_size=4):
+        score += _evaluate_window(window, my_mark, opp_mark)
+
+    return score
 
 
 def _immediate_winning_moves(board, mark):
@@ -161,7 +208,7 @@ def _hybrid_leaf_evaluate(board, root_mark):
         return -WIN_SCORE
     if _is_full(board):
         return 0.0
-    return _dqn_leaf_score(board, root_mark)
+    return _evaluate_board(board, root_mark) + _dqn_leaf_score(board, root_mark)
 
 
 def _ordered_moves(board, current_mark, root_mark):
@@ -197,9 +244,50 @@ def _is_terminal(board):
     return _has_connect_n(board, 1) or _has_connect_n(board, 2) or _is_full(board)
 
 
-def _minimax_dqn(board, depth, alpha, beta, current_mark, root_mark):
+class _SearchTimeout(RuntimeError):
+    pass
+
+
+def _probe_transposition(cache, key, depth, alpha, beta):
+    entry = cache.get(key)
+    if entry is None or entry["depth"] < depth:
+        return alpha, beta, None
+    flag = entry["flag"]
+    score = entry["score"]
+    action = entry["action"]
+    if flag == "exact":
+        return alpha, beta, (score, action)
+    if flag == "lower":
+        alpha = max(alpha, score)
+    else:
+        beta = min(beta, score)
+    if alpha >= beta:
+        return alpha, beta, (score, action)
+    return alpha, beta, None
+
+
+def _store_transposition(cache, key, depth, score, action, original_alpha, original_beta):
+    if score <= original_alpha:
+        flag = "upper"
+    elif score >= original_beta:
+        flag = "lower"
+    else:
+        flag = "exact"
+    cache[key] = {{"depth": depth, "score": score, "action": action, "flag": flag}}
+
+
+def _minimax_dqn(board, depth, alpha, beta, current_mark, root_mark, cache, deadline=None):
+    if deadline is not None and time.perf_counter() >= deadline:
+        raise _SearchTimeout
     if depth == 0 or _is_terminal(board):
         return _hybrid_leaf_evaluate(board, root_mark), None
+
+    original_alpha = alpha
+    original_beta = beta
+    cache_key = (board, depth, current_mark, root_mark)
+    alpha, beta, cached = _probe_transposition(cache, cache_key, depth, alpha, beta)
+    if cached is not None:
+        return cached
 
     maximizing = current_mark == root_mark
     best_action = None
@@ -216,6 +304,8 @@ def _minimax_dqn(board, depth, alpha, beta, current_mark, root_mark):
                 beta,
                 _opponent_mark(current_mark),
                 root_mark,
+                cache,
+                deadline,
             )
             if child_value > value:
                 value = child_value
@@ -223,6 +313,7 @@ def _minimax_dqn(board, depth, alpha, beta, current_mark, root_mark):
             alpha = max(alpha, value)
             if alpha >= beta:
                 break
+        _store_transposition(cache, cache_key, depth, value, best_action, original_alpha, original_beta)
         return value, best_action
 
     value = float("inf")
@@ -235,6 +326,8 @@ def _minimax_dqn(board, depth, alpha, beta, current_mark, root_mark):
             beta,
             _opponent_mark(current_mark),
             root_mark,
+            cache,
+            deadline,
         )
         if child_value < value:
             value = child_value
@@ -242,6 +335,7 @@ def _minimax_dqn(board, depth, alpha, beta, current_mark, root_mark):
         beta = min(beta, value)
         if alpha >= beta:
             break
+    _store_transposition(cache, cache_key, depth, value, best_action, original_alpha, original_beta)
     return value, best_action
 
 
@@ -254,14 +348,35 @@ def agent(observation, configuration):
     tactical_action = _forced_tactical_action(board, mark)
     if tactical_action is not None:
         return tactical_action
-    _score, action = _minimax_dqn(
-        board,
-        SEARCH_DEPTH,
-        float("-inf"),
-        float("inf"),
-        mark,
-        mark,
-    )
+    if TIME_LIMIT_SECONDS is None:
+        _score, action = _minimax_dqn(
+            board,
+            SEARCH_DEPTH,
+            float("-inf"),
+            float("inf"),
+            mark,
+            mark,
+            {{}},
+        )
+    else:
+        action = _choose_preferred_action(board, _valid_moves(board))
+        deadline = time.perf_counter() + max(0.0, TIME_LIMIT_SECONDS)
+        for current_depth in range(1, SEARCH_DEPTH + 1):
+            try:
+                _score, candidate_action = _minimax_dqn(
+                    board,
+                    current_depth,
+                    float("-inf"),
+                    float("inf"),
+                    mark,
+                    mark,
+                    {{}},
+                    deadline,
+                )
+            except _SearchTimeout:
+                break
+            if candidate_action is not None:
+                action = candidate_action
     if action is None:
         raise ValueError("Cannot choose an action from a terminal position")
     return action
@@ -272,8 +387,12 @@ def export_hybrid_submission(
     checkpoint_path: str | Path,
     output_path: str | Path,
     depth: int = 2,
+    time_limit_s: float | None = None,
 ) -> Path:
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(build_hybrid_submission_source(checkpoint_path, depth=depth), encoding="utf-8")
+    output_path.write_text(
+        build_hybrid_submission_source(checkpoint_path, depth=depth, time_limit_s=time_limit_s),
+        encoding="utf-8",
+    )
     return output_path
